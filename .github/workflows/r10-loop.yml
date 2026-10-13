@@ -1,0 +1,58 @@
+# Fork-only 20-run loop of the R-S10 spec on the fixed tree, all three runner families.
+# Not for upstream; the final PR carries no loop step.
+name: R-S10 20-run loop
+
+on:
+  push:
+    branches: [probe/r-s10-loop]
+  workflow_dispatch:
+
+jobs:
+  loop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install dependencies
+        uses: ./.github/actions/bun-install
+
+      - name: Loop the spec 20 times
+        shell: bash
+        run: |
+          pass=0; fail=0
+          for i in $(seq 1 20); do
+            if bun tests/run-tests.ts tests/unit/db/rabbitmq/hostile-peers.test.ts > "iter-$i.log" 2>&1; then
+              pass=$((pass+1))
+            else
+              fail=$((fail+1))
+              mv "iter-$i.log" "failures-iter-$i.log"
+            fi
+          done
+          echo "pass=$pass fail=$fail" | tee "summary-${{ matrix.os }}.txt"
+
+      - name: Upload loop results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r10-loop-${{ matrix.os }}
+          path: |
+            summary-${{ matrix.os }}.txt
+            failures-iter-*.log
+          if-no-files-found: ignore
