@@ -1,0 +1,53 @@
+# Fork-only: how long the peer's sockets really take to close after a heavy stop.
+# Not for upstream; measurement scaffolding only.
+name: R-S10 close-timing probe
+
+on:
+  push:
+    branches: [probe/r-s10-wait]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install dependencies
+        uses: ./.github/actions/bun-install
+
+      - name: Probe 30 times with an 8 s close-timing bound
+        shell: bash
+        env:
+          OPEN_WAIT_MS: "8000"
+        run: |
+          for i in $(seq 1 30); do
+            PROBE_ITER=$i bun tests/helpers/r10-probe.ts >> "wait-${{ matrix.os }}.jsonl" 2>> "wait-${{ matrix.os }}.err" || echo "iter $i exit $?" >> "wait-${{ matrix.os }}.err"
+          done
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r10-wait-${{ matrix.os }}
+          path: |
+            wait-${{ matrix.os }}.jsonl
+            wait-${{ matrix.os }}.err
+          if-no-files-found: ignore

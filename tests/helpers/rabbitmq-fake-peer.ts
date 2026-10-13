@@ -1016,6 +1016,8 @@ export interface HostileOutcome {
   readonly ms: number;
   /** Peer sockets still open 1 s after the read settled. */
   readonly openAfter: number;
+  /** Probe-only: how long the wait for the peer's sockets to close actually ran, in ms. */
+  readonly openWaitedMs?: number;
 }
 
 /**
@@ -1061,10 +1063,12 @@ export async function runHostilePeer(
   }
   const ms = performance.now() - started;
   // The peer sees the client's socket go once its FIN or RST is read; other peers' floods can delay that by a few ms.
-  for (let waited = 0; waited < 1_000 && (fake?.openSockets() ?? 0) > 0; waited += 10) await sleep(10);
+  const openWaitBound = Number(process.env.OPEN_WAIT_MS ?? "1000");
+  let openWaitedMs = 0;
+  for (; openWaitedMs < openWaitBound && (fake?.openSockets() ?? 0) > 0; openWaitedMs += 10) await sleep(10);
   const openAfter = fake?.openSockets() ?? 0;
   await fake?.stop();
-  return { name: peer.name, label, rows, ms, openAfter };
+  return { name: peer.name, label, rows, ms, openAfter, openWaitedMs };
 }
 
 /**
