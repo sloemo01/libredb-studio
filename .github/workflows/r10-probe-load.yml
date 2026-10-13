@@ -1,0 +1,63 @@
+# Fork-only load probe for issue #1726: the idle runner does not fail, so stretch the runner first.
+# Not for upstream; the final PR carries no probe step.
+name: R-S10 load probe
+
+on:
+  push:
+    branches: [probe/r-s10-load]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install dependencies
+        uses: ./.github/actions/bun-install
+
+      - name: Probe the hostile set 10 times beside three busy loops
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            node -e 'const until = Date.now() + 2400000; while (Date.now() < until) {}' &
+          done
+          echo "busy loops: $(jobs -p | wc -l)"
+          for i in $(seq 1 10); do
+            PROBE_ITER=$i bun tests/helpers/r10-probe.ts >> "load-${{ matrix.os }}.jsonl" 2>> "load-${{ matrix.os }}.err" || echo "iter $i exit $?" >> "load-${{ matrix.os }}.err"
+          done
+          kill $(jobs -p) 2>/dev/null || true
+          echo "done"
+
+      - name: Report
+        if: always()
+        shell: bash
+        run: |
+          wc -l "load-${{ matrix.os }}.jsonl" 2>/dev/null || echo "no output"
+
+      - name: Upload probe results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r10-load-${{ matrix.os }}
+          path: |
+            load-${{ matrix.os }}.jsonl
+            load-${{ matrix.os }}.err
+          if-no-files-found: ignore
